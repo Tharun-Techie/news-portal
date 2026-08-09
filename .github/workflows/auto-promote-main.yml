@@ -51,31 +51,13 @@ jobs:
           fi
           PR_URL=$(gh pr create --base master --head main --title "auto: main → master" --body "Automated promotion after merge to main.
 
-          Flow: dev → main → master (auto-merged)
-          Trigger: push to main ${{ github.sha }})
+          Flow: dev → main → master (requires manual approval)
+          Trigger: push to main ${{ github.sha }}
+
+          ⚠️ This PR requires manual approval before merge (pre/prod will auto-merge after master).")
           echo "Created $PR_URL"
           PR=$(gh pr list --base master --head main --state open --json number --jq '.[0].number')
           echo "pr=$PR" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Auto approve PR
-        if: steps.diff.outputs.needs_pr == 'true'
-        run: |
-          PR=${{ steps.create.outputs.pr }}
-          if [ -z "$PR" ]; then PR=$(gh pr list --base master --head main --state open --json number --jq '.[0].number'); fi
-          echo "Approving PR #$PR"
-          gh pr review $PR --approve --body "auto-approved promotion main → master" || echo "approve failed"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Merge PR
-        if: steps.diff.outputs.needs_pr == 'true'
-        run: |
-          PR=${{ steps.create.outputs.pr }}
-          if [ -z "$PR" ]; then PR=$(gh pr list --base master --head main --state open --json number --jq '.[0].number'); fi
-          echo "Merging PR #$PR main -> master"
-          gh pr merge $PR --merge --delete-branch=false || gh pr merge $PR --auto --merge
-          echo "Merged main -> master"
+          echo "PR #$PR created for main -> master - awaiting manual approval"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
