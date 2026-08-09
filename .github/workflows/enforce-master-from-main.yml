@@ -1,0 +1,26 @@
+name: Enforce master <- main only
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+jobs:
+  check-source-branch:
+    name: Only main can PR into master
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate source branch
+        run: |
+          echo "Base branch: ${{ github.base_ref }}"
+          echo "Head branch: ${{ github.head_ref }}"
+          echo "Event: ${{ github.event_name }}"
+          
+          if [ "${{ github.head_ref }}" != "main" ]; then
+            echo "::error::❌ Merge to 'master' is only allowed from 'main'."
+            echo "::error::Current source branch is '${{ github.head_ref }}'."
+            echo "::error::Flow: future/* -> dev -> main -> master -> pre -> prod"
+            exit 1
+          fi
+          
+          echo "✅ Valid: main -> master"
