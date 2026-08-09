@@ -1,0 +1,155 @@
+name: Auto Promote master -> pre -> prod
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote-pre:
+    name: master -> pre
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin master pre --prune
+
+      - name: Check diff master -> pre
+        id: diff-pre
+        run: |
+          if git diff --quiet origin/pre origin/master; then
+            echo "needs_pr=false" >> $GITHUB_OUTPUT
+            echo "pre is already up-to-date with master"
+          else
+            echo "needs_pr=true" >> $GITHUB_OUTPUT
+            echo "pre needs promotion"
+            git log --oneline origin/pre..origin/master --no-merges | head -20
+          fi
+
+      - name: Create PR master -> pre
+        if: steps.diff-pre.outputs.needs_pr == 'true'
+        id: create-pre
+        run: |
+          # create PR if not exists
+          existing=$(gh pr list --base pre --head master --state open --json number --jq length)
+          if [ "$existing" != "0" ]; then
+            echo "PR already exists master->pre"
+            PR=$(gh pr list --base pre --head master --state open --json number --jq '.[0].number')
+            echo "pr=$PR" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          PR_URL=$(gh pr create --base pre --head master --title "auto: master → pre" --body "Automated promotion after merge to master.
+
+          Flow: main → master → pre (auto-merged)
+          Trigger: push to master ${{ github.sha }})
+          echo "Created $PR_URL"
+          PR=$(gh pr list --base pre --head master --state open --json number --jq '.[0].number')
+          echo "pr=$PR" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto approve PR pre
+        if: steps.diff-pre.outputs.needs_pr == 'true'
+        run: |
+          PR=${{ steps.create-pre.outputs.pr }}
+          if [ -z "$PR" ]; then PR=$(gh pr list --base pre --head master --state open --json number --jq '.[0].number'); fi
+          echo "Approving PR #$PR"
+          gh pr review $PR --approve --body "auto-approved promotion master → pre" || echo "approve failed / already approved"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge PR pre
+        if: steps.diff-pre.outputs.needs_pr == 'true'
+        run: |
+          PR=${{ steps.create-pre.outputs.pr }}
+          if [ -z "$PR" ]; then PR=$(gh pr list --base pre --head master --state open --json number --jq '.[0].number'); fi
+          echo "Merging PR #$PR master -> pre"
+          gh pr merge $PR --merge --delete-branch=false || gh pr merge $PR --auto --merge
+          echo "Merged master -> pre"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  promote-prod:
+    name: master -> prod
+    runs-on: ubuntu-latest
+    needs: promote-pre
+    # run even if pre was up-to-date, but after pre job finishes
+    if: always() && !cancelled()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin master prod --prune
+
+      - name: Check diff master -> prod
+        id: diff-prod
+        run: |
+          if git diff --quiet origin/prod origin/master; then
+            echo "needs_pr=false" >> $GITHUB_OUTPUT
+            echo "prod is already up-to-date with master"
+          else
+            echo "needs_pr=true" >> $GITHUB_OUTPUT
+            echo "prod needs promotion"
+            git log --oneline origin/prod..origin/master --no-merges | head -20
+          fi
+
+      - name: Create PR master -> prod
+        if: steps.diff-prod.outputs.needs_pr == 'true'
+        id: create-prod
+        run: |
+          existing=$(gh pr list --base prod --head master --state open --json number --jq length)
+          if [ "$existing" != "0" ]; then
+            echo "PR already exists master->prod"
+            PR=$(gh pr list --base prod --head master --state open --json number --jq '.[0].number')
+            echo "pr=$PR" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          PR_URL=$(gh pr create --base prod --head master --title "auto: master → prod" --body "Automated promotion after merge to master.
+
+          Flow: main → master → prod (auto-merged)
+          Trigger: push to master ${{ github.sha }})
+          echo "Created $PR_URL"
+          PR=$(gh pr list --base prod --head master --state open --json number --jq '.[0].number')
+          echo "pr=$PR" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto approve PR prod
+        if: steps.diff-prod.outputs.needs_pr == 'true'
+        run: |
+          PR=${{ steps.create-prod.outputs.pr }}
+          if [ -z "$PR" ]; then PR=$(gh pr list --base prod --head master --state open --json number --jq '.[0].number'); fi
+          echo "Approving PR #$PR"
+          gh pr review $PR --approve --body "auto-approved promotion master → prod" || echo "approve failed"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge PR prod
+        if: steps.diff-prod.outputs.needs_pr == 'true'
+        run: |
+          PR=${{ steps.create-prod.outputs.pr }}
+          if [ -z "$PR" ]; then PR=$(gh pr list --base prod --head master --state open --json number --jq '.[0].number'); fi
+          echo "Merging PR #$PR master -> prod"
+          gh pr merge $PR --merge --delete-branch=false || gh pr merge $PR --auto --merge
+          echo "Merged master -> prod"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
